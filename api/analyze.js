@@ -1,48 +1,49 @@
-// 这是一个 Vercel Serverless Function，用于代理对 Google Gemini API 的请求。
-// 请将此文件保存在你的项目根目录下的 'api' 文件夹中。
-
-// 导入必需的模块
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
+// IMPORTANT: Never hard-code your API key in the file.
+// Vercel will inject it as an environment variable (GEMINI_API_KEY).
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
 module.exports = async (req, res) => {
-    // 确保请求方法是 POST
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method Not Allowed' });
-    }
+  // Set CORS headers to allow all origins
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    try {
-        // 从环境变量中获取 API 密钥，保障安全
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) {
-            throw new Error('API key is not configured in Vercel environment variables.');
-        }
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).send();
+  }
 
-        // 从请求体中获取前端发送的数据
-        const { userPrompt, inlineData } = req.body;
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
 
-        // 初始化 Google Generative AI
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: "gemini-pro-vision" });
+  if (!req.body || !req.body.text) {
+    return res.status(400).json({ error: 'Request body must contain a "text" field.' });
+  }
 
-        // 构建请求体，包括文本和图片数据
-        const parts = [
-            { text: userPrompt },
-            {
-                inlineData: {
-                    mimeType: inlineData.mimeType,
-                    data: inlineData.data
-                }
-            }
-        ];
+  // Use the correct model for text generation: gemini-1.5-flash
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-        // 调用 Gemini API
-        const result = await model.generateContent({ contents: [{ parts }] });
-        const response = await result.response;
+  try {
+    const prompt = req.body.text;
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
 
-        // 将结果返回给前端
-        res.status(200).json(response);
-    } catch (error) {
-        console.error('API Error:', error);
-        res.status(500).json({ error: { message: error.message || 'An unknown error occurred.' } });
-    }
+    res.status(200).json({
+      success: true,
+      data: {
+        text: text,
+      },
+    });
+  } catch (error) {
+    console.error('API Error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'An unexpected error occurred.',
+      details: error.toString(),
+    });
+  }
 };
