@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 摄影导师</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+
+    <div class="bg-white p-8 rounded-2xl shadow-xl max-w-lg w-full text-center space-y-6">
+        <h1 class="text-3xl font-bold text-gray-800">AI 摄影导师</h1>
+        <p class="text-gray-600">选择一张照片，让 AI 导师为你提供专业的摄影分析和改进建议。</p>
+
+        <!-- 文件输入区域 -->
+        <input type="file" id="fileInput" accept="image/*" class="hidden" onchange="previewImage()">
+        <label for="fileInput" class="cursor-pointer bg-blue-500 text-white py-3 px-6 rounded-full font-semibold hover:bg-blue-600 transition duration-300 shadow-md">
+            选择照片
+        </label>
+
+        <!-- 图像预览 -->
+        <div id="previewContainer" class="hidden mt-4">
+            <img id="imagePreview" src="#" alt="图片预览" class="w-full h-auto rounded-xl shadow-inner border border-gray-300">
+        </div>
+
+        <!-- 分析按钮和加载指示器 -->
+        <button id="analyzeButton" onclick="analyzePhoto()" class="w-full bg-green-500 text-white py-3 px-6 rounded-full font-semibold hover:bg-green-600 transition duration-300 shadow-md hidden">
+            开始分析
+        </button>
+        <div id="loadingIndicator" class="hidden mt-4 flex justify-center items-center space-x-2">
+            <svg class="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span class="text-gray-600">分析中...</span>
+        </div>
+
+        <!-- 分析结果显示区域 -->
+        <div id="resultContainer" class="hidden mt-6 text-left">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-2">分析结果</h2>
+            <div id="analysisResult" class="bg-gray-100 p-4 rounded-xl border border-gray-200">
+                <p class="text-gray-700 leading-relaxed"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedFile = null;
+
+        function previewImage() {
+            const fileInput = document.getElementById('fileInput');
+            const previewContainer = document.getElementById('previewContainer');
+            const imagePreview = document.getElementById('imagePreview');
+            const analyzeButton = document.getElementById('analyzeButton');
+            const resultContainer = document.getElementById('resultContainer');
+            
+            const file = fileInput.files[0];
+            if (file) {
+                selectedFile = file;
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    imagePreview.src = e.target.result;
+                    previewContainer.classList.remove('hidden');
+                    analyzeButton.classList.remove('hidden');
+                    resultContainer.classList.add('hidden');
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        async function analyzePhoto() {
+            if (!selectedFile) {
+                // 不再使用 alert，用 UI 提示
+                showMessage("请先选择一张照片！", 'error');
+                return;
+            }
+
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const analyzeButton = document.getElementById('analyzeButton');
+            const resultContainer = document.getElementById('resultContainer');
+            const analysisResult = document.getElementById('analysisResult');
+
+            analyzeButton.disabled = true;
+            analyzeButton.classList.add('opacity-50', 'cursor-not-allowed');
+            loadingIndicator.classList.remove('hidden');
+            resultContainer.classList.add('hidden');
+            analysisResult.innerHTML = '<p class="text-gray-700 leading-relaxed"></p>';
+            
+            try {
+                const base64Data = await new Promise(resolve => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                    reader.readAsDataURL(selectedFile);
+                });
+
+                const mimeType = selectedFile.type;
+                const userPrompt = "你是一位专业的摄影导师。请从构图、色彩、光线和主题表达等几个方面详细分析这张照片，并给出具体的改进建议。请用中文回答。";
+
+                const payload = {
+                    inlineData: {
+                        mimeType: mimeType,
+                        data: base64Data
+                    },
+                    userPrompt: userPrompt
+                };
+
+                // 向代理服务器发送请求
+                const response = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error.message || 'API 请求失败');
+                }
+
+                const result = await response.json();
+                const advice = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                if (advice) {
+                    analysisResult.innerHTML = advice.replace(/\n/g, '<br>');
+                } else {
+                    analysisResult.innerHTML = '<p class="text-red-500">无法从 API 获取有效建议。请稍后重试。</p>';
+                }
+
+                resultContainer.classList.remove('hidden');
+
+            } catch (error) {
+                analysisResult.innerHTML = `<p class="text-red-500">分析失败：${error.message}</p>`;
+                resultContainer.classList.remove('hidden');
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                analyzeButton.disabled = false;
+                analyzeButton.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+    </script>
+</body>
+</html>
